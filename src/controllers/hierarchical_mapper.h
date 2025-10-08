@@ -59,6 +59,12 @@ class HierarchicalMapperController : public Thread {
     // The number of workers used to reconstruct clusters in parallel.
     int num_workers = -1;
 
+    // Path to file containing list of cluster files
+    std::string custom_cluster_list_path = "";
+  
+    // Enable custom clustering mode
+    bool use_custom_clusters = false;
+
     bool Check() const;
   };
 

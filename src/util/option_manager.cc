@@ -73,6 +73,9 @@ OptionManager::OptionManager(bool add_project_options) {
   poisson_meshing = std::make_shared<mvs::PoissonMeshingOptions>();
   delaunay_meshing = std::make_shared<mvs::DelaunayMeshingOptions>();
   render = std::make_shared<RenderOptions>();
+  
+  // Add hierarchical mapper controller options
+  hierarchical_mapper_controller = std::make_shared<HierarchicalMapperController::Options>();
 
   Reset();
 
@@ -84,6 +87,13 @@ OptionManager::OptionManager(bool add_project_options) {
   if (add_project_options) {
     desc_->add_options()("project_path", config::value<std::string>());
   }
+  desc_->add_options()
+    ("HierarchicalMapperController.custom_cluster_list_path",
+     boost::program_options::value<std::string>(&hierarchical_mapper_controller->custom_cluster_list_path)->default_value(""),
+     "Path to file containing list of cluster files")
+    ("HierarchicalMapperController.use_custom_clusters",
+     boost::program_options::value<bool>(&hierarchical_mapper_controller->use_custom_clusters)->default_value(false),
+     "Use custom clusters instead of automatic clustering");
 }
 
 void OptionManager::ModifyForIndividualData() {
@@ -973,6 +983,29 @@ void OptionManager::Write(const std::string& path) const {
   }
 
   boost::property_tree::write_ini(path, pt);
+}
+
+// Add to threading.cc or a new utility file
+std::vector<std::vector<std::string>> ReadCustomClustersFromFiles(
+    const std::vector<std::string>& cluster_files) {
+    
+    std::vector<std::vector<std::string>> clusters;
+    
+    for (const auto& file_path : cluster_files) {
+        std::ifstream file(file_path);
+        std::vector<std::string> cluster_images;
+        std::string image_name;
+        
+        while (std::getline(file, image_name)) {
+            if (!image_name.empty()) {
+                cluster_images.push_back(image_name);
+            }
+        }
+        
+        clusters.push_back(cluster_images);
+    }
+    
+    return clusters;
 }
 
 }  // namespace colmap

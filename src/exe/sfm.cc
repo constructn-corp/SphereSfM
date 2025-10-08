@@ -274,6 +274,13 @@ int RunHierarchicalMapper(int argc, char** argv) {
   options.AddDefaultOption("image_overlap", &clustering_options.image_overlap);
   options.AddDefaultOption("leaf_max_num_images",
                            &clustering_options.leaf_max_num_images);
+  
+  // Add your custom cluster options using OptionManager methods
+  options.AddDefaultOption("use_custom_clusters", 
+                           &hierarchical_options.use_custom_clusters);
+  options.AddDefaultOption("custom_cluster_list_path", 
+                           &hierarchical_options.custom_cluster_list_path);
+  
   options.AddMapperOptions();
   options.Parse(argc, argv);
 
