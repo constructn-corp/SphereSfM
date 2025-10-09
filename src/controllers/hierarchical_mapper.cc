@@ -165,6 +165,10 @@ bool HierarchicalMapperController::Options::Check() const {
   CHECK_OPTION_GT(init_num_trials, -1);
   CHECK_OPTION_GE(num_workers, -1);
   
+  if (cluster_outpath.empty()) {
+    std::cerr << "ERROR: cluster_outpath is empty" << std::endl;
+    return false;
+  }
   // Check custom cluster options
   if (use_custom_clusters) {
     if (custom_cluster_list_path.empty()) {
@@ -225,6 +229,8 @@ void HierarchicalMapperController::Run() {
   std::vector<const SceneClustering::Cluster*> leaf_clusters;
   std::unique_ptr<SceneClustering> scene_clustering_ptr;
   
+  std::cout << "Using cluster_outpath as : " << options_.cluster_outpath << std::endl;
+  
   if (options_.use_custom_clusters) {
     std::cout << "Using custom clusters from: " << options_.custom_cluster_list_path << std::endl;
     
@@ -267,7 +273,7 @@ void HierarchicalMapperController::Run() {
   size_t total_num_images = 0;
   
   // Create clusters directory
-  const std::string clusters_dir = "clusters";
+  const std::string clusters_dir = options_.cluster_outpath;
   
   auto CreateDir = [](const std::string& path) {
 #if defined(_WIN32)

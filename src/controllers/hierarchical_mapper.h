@@ -59,6 +59,9 @@ class HierarchicalMapperController : public Thread {
     // The number of workers used to reconstruct clusters in parallel.
     int num_workers = -1;
 
+    // Path for cluster output files to save
+    std::string cluster_outpath = ".";
+
     // Path to file containing list of cluster files
     std::string custom_cluster_list_path = "";
   

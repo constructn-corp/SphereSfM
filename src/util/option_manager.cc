@@ -88,6 +88,9 @@ OptionManager::OptionManager(bool add_project_options) {
     desc_->add_options()("project_path", config::value<std::string>());
   }
   desc_->add_options()
+    ("HierarchicalMapperController.cluster_outpath",
+     boost::program_options::value<std::string>(&hierarchical_mapper_controller->cluster_outpath)->default_value("."),
+     "Path for cluster output files to save")
     ("HierarchicalMapperController.custom_cluster_list_path",
      boost::program_options::value<std::string>(&hierarchical_mapper_controller->custom_cluster_list_path)->default_value(""),
      "Path to file containing list of cluster files")

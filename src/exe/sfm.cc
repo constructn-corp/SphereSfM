@@ -280,7 +280,9 @@ int RunHierarchicalMapper(int argc, char** argv) {
                            &hierarchical_options.use_custom_clusters);
   options.AddDefaultOption("custom_cluster_list_path", 
                            &hierarchical_options.custom_cluster_list_path);
-  
+  options.AddDefaultOption("cluster_outpath", 
+                           &hierarchical_options.cluster_outpath);
+
   options.AddMapperOptions();
   options.Parse(argc, argv);
 
