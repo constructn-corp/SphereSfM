@@ -443,20 +443,28 @@ if (leaf_clusters.size() > 1) {
     // Create a new reconstruction manager for the final result
     ReconstructionManager final_reconstruction_manager;
     
-    // Find the largest reconstruction as the base
     ReconstructionManager* base_manager = nullptr;
     size_t max_points = 0;
-    
-    for (auto& pair : reconstruction_managers) {
-      if (pair.second.Size() > 0) {
-        size_t num_points = pair.second.Get(0).NumPoints3D();
-        if (num_points > max_points) {
-          max_points = num_points;
-          base_manager = &pair.second;
-        }
-      }
-    }
-    
+
+    // Find the largest reconstruction as the base
+
+    // for (auto& pair : reconstruction_managers) {
+    //   if (pair.second.Size() > 0) {
+    //     size_t num_points = pair.second.Get(0).NumPoints3D();
+    //     if (num_points > max_points) {
+    //       max_points = num_points;
+    //       base_manager = &pair.second;
+    //     }
+    //   }
+    // }
+
+    // Assuming 1st one as reconstruction base
+  auto it = reconstruction_managers.begin();
+  if (it->second.Size() > 0) {
+      base_manager = &it->second;
+      max_points = base_manager->Get(0).NumPoints3D();
+  }
+
     if (base_manager && base_manager->Size() > 0) {
       // Copy the base reconstruction
       final_reconstruction_manager.Add();
@@ -477,12 +485,29 @@ if (leaf_clusters.size() > 1) {
           } else {
             std::cout << "Failed to merge cluster with " 
                       << pair.second.Get(0).NumPoints3D() << " points" << std::endl;
+            std::cout << "saving intermediate state " << std::endl;
+            
+            // When saving a stage, move it:
+            auto stage_mgr = std::make_unique<ReconstructionManager>();
+            stage_mgr->Add();
+            stage_mgr->Get(0) = final_reconstruction_manager.Get(0);
+            stage_reconstructions_.push_back(std::move(stage_mgr));
+            stage_reconstructions_.back()->Get(0).WriteBinary(
+                merge_stages_dir_ + "/stage_" + std::to_string(stage_reconstructions_.size())
+            );
+          
+          // Restart with new base
+            final_reconstruction_manager.Clear(); 
+            final_reconstruction_manager.Add();
+            final_reconstruction_manager.Get(0) = pair.second.Get(0);
+            std::cout << "Added as separate reconstruction" << std::endl;            
+            base_manager = &pair.second;
           }
         }
       }
       
-      *reconstruction_manager_ = std::move(final_reconstruction_manager);
     }
+    *reconstruction_manager_ = std::move(final_reconstruction_manager);
     
   } else {
     // Use original merging for automatic clustering

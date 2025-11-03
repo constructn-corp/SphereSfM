@@ -76,7 +76,7 @@ class HierarchicalMapperController : public Thread {
       const SceneClustering::Options& clustering_options,
       const IncrementalMapperOptions& mapper_options,
       ReconstructionManager* reconstruction_manager);
-
+      const std::string merge_stages_dir_;
  private:
   void Run() override;
 
@@ -84,6 +84,7 @@ class HierarchicalMapperController : public Thread {
   const SceneClustering::Options clustering_options_;
   const IncrementalMapperOptions mapper_options_;
   ReconstructionManager* reconstruction_manager_;
+  std::vector<std::unique_ptr<ReconstructionManager>> stage_reconstructions_;
 };
 
 }  // namespace colmap
