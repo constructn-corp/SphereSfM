@@ -77,6 +77,7 @@ class HierarchicalMapperController : public Thread {
       const IncrementalMapperOptions& mapper_options,
       ReconstructionManager* reconstruction_manager);
       const std::string merge_stages_dir_;
+      std::mutex stages_mutex_;
  private:
   void Run() override;
 

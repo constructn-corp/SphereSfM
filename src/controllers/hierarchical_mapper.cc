@@ -486,7 +486,14 @@ if (leaf_clusters.size() > 1) {
             std::cout << "Failed to merge cluster with " 
                       << pair.second.Get(0).NumPoints3D() << " points" << std::endl;
             std::cout << "saving intermediate state " << std::endl;
+            std::lock_guard<std::mutex> lock(stages_mutex_);
             
+            std::string merge_stages_dir = "results/merge_stages";
+            std::string stage_dir = merge_stages_dir + "/stage_" + std::to_string(stage_reconstructions_.size());
+
+            // Make sure base and stage dirs exist:
+            mkdir(merge_stages_dir.c_str(), 0755);
+            mkdir(stage_dir.c_str(), 0755);
             // When saving a stage, move it:
             auto stage_mgr = std::make_unique<ReconstructionManager>();
             stage_mgr->Add();
