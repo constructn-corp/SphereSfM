@@ -488,20 +488,21 @@ if (leaf_clusters.size() > 1) {
             std::cout << "saving intermediate state " << std::endl;
             std::lock_guard<std::mutex> lock(stages_mutex_);
             
-            std::string merge_stages_dir = "results/merge_stages";
-            std::string stage_dir = merge_stages_dir + "/stage_" + std::to_string(stage_reconstructions_.size());
-
-            // Make sure base and stage dirs exist:
-            mkdir(merge_stages_dir.c_str(), 0755);
-            mkdir(stage_dir.c_str(), 0755);
-            // When saving a stage, move it:
+              // When saving a stage, move it:
             auto stage_mgr = std::make_unique<ReconstructionManager>();
             stage_mgr->Add();
             stage_mgr->Get(0) = final_reconstruction_manager.Get(0);
             stage_reconstructions_.push_back(std::move(stage_mgr));
-            stage_reconstructions_.back()->Get(0).WriteBinary(
-                merge_stages_dir_ + "/stage_" + std::to_string(stage_reconstructions_.size())
-            );
+
+            std::string merge_stages_base = options_.cluster_outpath + "/merge_stages";
+            std::string merge_stages_dir = merge_stages_base + "/stage_" + std::to_string(stage_reconstructions_.size());
+
+            // Create parent directory first
+            mkdir(merge_stages_base.c_str(), 0755);
+            // Make sure base and stage dirs exist:
+            mkdir(merge_stages_dir.c_str(), 0755);
+
+            stage_reconstructions_.back()->Get(0).WriteBinary( merge_stages_dir );
           
           // Restart with new base
             final_reconstruction_manager.Clear(); 
