@@ -37,6 +37,7 @@
 #include <boost/program_options.hpp>
 
 #include "util/logging.h"
+#include "controllers/hierarchical_mapper.h"
 
 namespace colmap {
 
@@ -141,6 +142,7 @@ class OptionManager {
   std::shared_ptr<mvs::DelaunayMeshingOptions> delaunay_meshing;
 
   std::shared_ptr<RenderOptions> render;
+  std::shared_ptr<HierarchicalMapperController::Options> hierarchical_mapper_controller;
 
  private:
   template <typename T>

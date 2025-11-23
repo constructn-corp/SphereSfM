@@ -33,9 +33,77 @@
 
 #include "base/scene_clustering.h"
 #include "util/misc.h"
+#include <sys/stat.h>  
+#include <sys/types.h> 
+#include <fstream>
 
 namespace colmap {
 namespace {
+
+// Helper function to read cluster files from a list file
+std::vector<std::vector<std::string>> ReadCustomClusterFiles(const std::string& cluster_list_path) {
+    std::vector<std::vector<std::string>> clusters;
+    
+    std::ifstream cluster_list_file(cluster_list_path);
+    if (!cluster_list_file.is_open()) {
+        std::cerr << "ERROR: Could not open cluster list file: " << cluster_list_path << std::endl;
+        return clusters;
+    }
+    
+    std::string cluster_file_path;
+    int cluster_count = 0;
+    while (std::getline(cluster_list_file, cluster_file_path)) {
+        if (cluster_file_path.empty() || cluster_file_path[0] == '#') {
+            continue;  // Skip empty lines and comments
+        }
+        
+        std::ifstream cluster_file(cluster_file_path);
+        if (!cluster_file.is_open()) {
+            std::cerr << "WARNING: Could not open cluster file: " << cluster_file_path << std::endl;
+            continue;
+        }
+        
+        std::vector<std::string> cluster_images;
+        std::string image_name;
+        while (std::getline(cluster_file, image_name)) {
+            if (!image_name.empty() && image_name[0] != '#') {
+                // Remove any trailing whitespace or path separators
+                image_name.erase(image_name.find_last_not_of(" \t\r\n") + 1);
+                cluster_images.push_back(image_name);
+            }
+        }
+        
+        if (!cluster_images.empty()) {
+            clusters.push_back(cluster_images);
+            cluster_count++;
+            std::cout << "Loaded cluster " << cluster_count << " with " << cluster_images.size() 
+                      << " images from " << cluster_file_path << std::endl;
+        }
+        cluster_file.close();
+    }
+    
+    cluster_list_file.close();
+    return clusters;
+}
+
+// Helper function to convert image names to image IDs
+std::vector<image_t> ConvertNamesToIds(const std::vector<std::string>& image_names, 
+                                       const std::unordered_map<std::string, image_t>& name_to_id_map) {
+    std::vector<image_t> image_ids;
+    image_ids.reserve(image_names.size());
+    
+    for (const auto& name : image_names) {
+        auto it = name_to_id_map.find(name);
+        if (it != name_to_id_map.end()) {
+            image_ids.push_back(it->second);
+        } else {
+            std::cerr << "WARNING: Image not found in database: " << name << std::endl;
+        }
+    }
+    
+    return image_ids;
+}
+
 
 void MergeClusters(
     const SceneClustering::Cluster& cluster,
@@ -96,6 +164,26 @@ void MergeClusters(
 bool HierarchicalMapperController::Options::Check() const {
   CHECK_OPTION_GT(init_num_trials, -1);
   CHECK_OPTION_GE(num_workers, -1);
+  
+  if (cluster_outpath.empty()) {
+    std::cerr << "ERROR: cluster_outpath is empty" << std::endl;
+    return false;
+  }
+  // Check custom cluster options
+  if (use_custom_clusters) {
+    if (custom_cluster_list_path.empty()) {
+      std::cerr << "ERROR: Custom cluster list path is empty" << std::endl;
+      return false;
+    }
+    std::ifstream test_file(custom_cluster_list_path);
+    if (!test_file.is_open()) {
+      std::cerr << "ERROR: Custom cluster list file does not exist or cannot be opened: " 
+                << custom_cluster_list_path << std::endl;
+      return false;
+    }
+    test_file.close();
+  }
+  
   return true;
 }
 
@@ -121,6 +209,7 @@ void HierarchicalMapperController::Run() {
   //////////////////////////////////////////////////////////////////////////////
 
   std::unordered_map<image_t, std::string> image_id_to_name;
+  std::unordered_map<std::string, image_t> image_name_to_id;
 
   Database database(options_.database_path);
 
@@ -128,22 +217,108 @@ void HierarchicalMapperController::Run() {
   const auto images = database.ReadAllImages();
   for (const auto& image : images) {
     image_id_to_name.emplace(image.ImageId(), image.Name());
+    image_name_to_id.emplace(image.Name(), image.ImageId());
   }
 
-  SceneClustering scene_clustering =
-      SceneClustering::Create(clustering_options_, database);
 
-  auto leaf_clusters = scene_clustering.GetLeafClusters();
+  //////////////////////////////////////////////////////////////////////////////
+  // Create clusters (custom or automatic)
+  //////////////////////////////////////////////////////////////////////////////
+  
+  std::vector<SceneClustering::Cluster> custom_leaf_clusters;
+  std::vector<const SceneClustering::Cluster*> leaf_clusters;
+  std::unique_ptr<SceneClustering> scene_clustering_ptr;
+  
+  std::cout << "Using cluster_outpath as : " << options_.cluster_outpath << std::endl;
+  
+  if (options_.use_custom_clusters) {
+    std::cout << "Using custom clusters from: " << options_.custom_cluster_list_path << std::endl;
+    
+    // Read custom cluster files
+    auto custom_clusters = ReadCustomClusterFiles(options_.custom_cluster_list_path);
+    
+    if (custom_clusters.empty()) {
+      std::cerr << "ERROR: No valid clusters found in custom cluster files!" << std::endl;
+      return;
+    }
+    
+    // Convert custom clusters to SceneClustering::Cluster format
+    custom_leaf_clusters.reserve(custom_clusters.size());
+    for (size_t i = 0; i < custom_clusters.size(); ++i) {
+      auto image_ids = ConvertNamesToIds(custom_clusters[i], image_name_to_id);
+      if (!image_ids.empty()) {
+        SceneClustering::Cluster cluster;
+        cluster.image_ids = image_ids;
+        custom_leaf_clusters.push_back(std::move(cluster));
+      } else {
+        std::cerr << "WARNING: Cluster " << (i + 1) << " has no valid images, skipping." << std::endl;
+      }
+    }
+    
+    // Create pointers to custom clusters
+    for (auto& cluster : custom_leaf_clusters) {
+      leaf_clusters.push_back(&cluster);
+    }
+    
+    std::cout << "Successfully created " << leaf_clusters.size() << " custom clusters." << std::endl;
+  } else {
+    std::cout << "Using automatic clustering..." << std::endl;
+    
+    // Use original automatic clustering - create object with unique_ptr for proper memory management
+    scene_clustering_ptr = std::make_unique<SceneClustering>(
+        SceneClustering::Create(clustering_options_, database));
+    leaf_clusters = scene_clustering_ptr->GetLeafClusters();
+  }
 
   size_t total_num_images = 0;
-  for (size_t i = 0; i < leaf_clusters.size(); ++i) {
-    total_num_images += leaf_clusters[i]->image_ids.size();
-    std::cout << StringPrintf("  Cluster %d with %d images", i + 1,
-                              leaf_clusters[i]->image_ids.size())
-              << std::endl;
+  
+  // Create clusters directory
+  const std::string clusters_dir = options_.cluster_outpath;
+  
+  auto CreateDir = [](const std::string& path) {
+#if defined(_WIN32)
+    return _mkdir(path.c_str()) == 0;
+#else 
+    return mkdir(path.c_str(), 0733) == 0;
+#endif
+  };
+  
+  auto ExistsDir = [](const std::string& path) {
+    struct stat info;
+    return stat(path.c_str(), &info) == 0 && (info.st_mode & S_IFDIR);
+  };
+  
+  if (!ExistsDir(clusters_dir)) {
+    CreateDir(clusters_dir);
   }
 
-  std::cout << StringPrintf("Clusters have %d images", total_num_images)
+
+  // Print cluster information with meaningful names
+  std::cout << "    ######################################" << std::endl;  
+  for (size_t i = 0; i < leaf_clusters.size(); ++i) {
+    const auto& cluster = leaf_clusters[i];
+    total_num_images += cluster->image_ids.size();
+
+
+    std::cout << StringPrintf("  %s %d with %d images:", 
+                              options_.use_custom_clusters ? "Custom Cluster" : "Cluster",
+                              i + 1, static_cast<int>(cluster->image_ids.size()))
+              << std::endl;
+
+
+    for (const image_t image_id : cluster->image_ids) {
+      std::cout << "    Image ID: " << image_id;
+
+
+      auto it = image_id_to_name.find(image_id);
+      if (it != image_id_to_name.end()) {
+        std::cout << " (" << it->second << ")";
+      }
+      std::cout << std::endl;
+    }
+  }
+
+  std::cout << StringPrintf("Clusters have %d images", static_cast<int>(total_num_images))
             << std::endl;
 
   //////////////////////////////////////////////////////////////////////////////
@@ -167,7 +342,8 @@ void HierarchicalMapperController::Run() {
   // Function to reconstruct one cluster using incremental mapping.
   auto ReconstructCluster = [&, this](
                                 const SceneClustering::Cluster& cluster,
-                                ReconstructionManager* reconstruction_manager) {
+                                ReconstructionManager* reconstruction_manager,
+                                const std::string& cluster_name) {
     if (cluster.image_ids.empty()) {
       return;
     }
@@ -183,11 +359,50 @@ void HierarchicalMapperController::Run() {
       custom_options.image_names.insert(image_id_to_name.at(image_id));
     }
 
+
+    // Create cluster-specific directory
+    const std::string cluster_dir = clusters_dir + "/" + cluster_name;
+    if (!ExistsDir(cluster_dir)) {
+      CreateDir(cluster_dir);
+    }
+
+
+    // Create a temporary reconstruction manager for this cluster
+    ReconstructionManager cluster_reconstruction_manager;
+    
     IncrementalMapperController mapper(&custom_options, options_.image_path,
                                        options_.database_path,
-                                       reconstruction_manager);
+                                       &cluster_reconstruction_manager);
     mapper.Start();
     mapper.Wait();
+
+
+    // Save the cluster reconstruction
+    if (cluster_reconstruction_manager.Size() > 0) {
+      // Save the reconstruction in the cluster directory
+      cluster_reconstruction_manager.Get(0).WriteBinary(cluster_dir);
+      cluster_reconstruction_manager.Get(0).WriteText(cluster_dir);
+      cluster_reconstruction_manager.Get(0).ExportPLY(cluster_dir + "/points.ply");
+      
+      // Save statistics
+      std::ofstream stats_file(cluster_dir + "/cluster_stats.txt");
+      if (stats_file.is_open()) {
+        const Reconstruction& reconstruction = cluster_reconstruction_manager.Get(0);
+        stats_file << "Cluster: " << cluster_name << "\n";
+        stats_file << "Number of images: " << reconstruction.NumImages() << "\n";
+        stats_file << "Registered images: " << reconstruction.NumRegImages() << "\n";
+        stats_file << "Number of points: " << reconstruction.NumPoints3D() << "\n";
+        stats_file << "Number of cameras: " << reconstruction.NumCameras() << "\n";
+        stats_file.close();
+      }
+      
+      LOG(INFO) << "Saved cluster reconstruction to: " << cluster_dir;
+      
+      // Copy the reconstruction to the main reconstruction manager
+      reconstruction_manager->Add();
+      reconstruction_manager->Get(reconstruction_manager->Size() - 1) = 
+          cluster_reconstruction_manager.Get(0);
+    }
   };
 
   // Start reconstructing the bigger clusters first for resource usage.
@@ -204,9 +419,14 @@ void HierarchicalMapperController::Run() {
   reconstruction_managers.reserve(leaf_clusters.size());
 
   ThreadPool thread_pool(num_eff_workers);
-  for (const auto& cluster : leaf_clusters) {
+  for (size_t i = 0; i < leaf_clusters.size(); ++i) {
+    const auto& cluster = leaf_clusters[i];
+    const std::string cluster_name = options_.use_custom_clusters ? 
+                                     ("custom_cluster_" + std::to_string(i + 1)) :
+                                     ("cluster_" + std::to_string(i + 1));
+    
     thread_pool.AddTask(ReconstructCluster, *cluster,
-                        &reconstruction_managers[cluster]);
+                        &reconstruction_managers[cluster], cluster_name);
   }
   thread_pool.Wait();
 
@@ -214,15 +434,103 @@ void HierarchicalMapperController::Run() {
   // Merge clusters
   //////////////////////////////////////////////////////////////////////////////
 
+if (leaf_clusters.size() > 1) {
   PrintHeading1("Merging clusters");
+  
+  if (options_.use_custom_clusters) {
+    std::cout << "Merging " << reconstruction_managers.size() << " custom clusters..." << std::endl;
+    
+    // Create a new reconstruction manager for the final result
+    ReconstructionManager final_reconstruction_manager;
+    
+    ReconstructionManager* base_manager = nullptr;
+    size_t max_points = 0;
 
-  MergeClusters(*scene_clustering.GetRootCluster(), &reconstruction_managers);
+    // Find the largest reconstruction as the base
 
-  CHECK_EQ(reconstruction_managers.size(), 1);
-  *reconstruction_manager_ = std::move(reconstruction_managers.begin()->second);
+    // for (auto& pair : reconstruction_managers) {
+    //   if (pair.second.Size() > 0) {
+    //     size_t num_points = pair.second.Get(0).NumPoints3D();
+    //     if (num_points > max_points) {
+    //       max_points = num_points;
+    //       base_manager = &pair.second;
+    //     }
+    //   }
+    // }
 
-  std::cout << std::endl;
-  GetTimer().PrintMinutes();
+    // Assuming 1st one as reconstruction base
+  auto it = reconstruction_managers.begin();
+  if (it->second.Size() > 0) {
+      base_manager = &it->second;
+      max_points = base_manager->Get(0).NumPoints3D();
+  }
+
+    if (base_manager && base_manager->Size() > 0) {
+      // Copy the base reconstruction
+      final_reconstruction_manager.Add();
+      final_reconstruction_manager.Get(0) = base_manager->Get(0);
+      
+      std::cout << "Base reconstruction has " << max_points << " points" << std::endl;
+      
+      // Try to merge other reconstructions into the base
+      for (auto& pair : reconstruction_managers) {
+        if (&pair.second != base_manager && pair.second.Size() > 0) {
+          const double kMaxReprojError = 8.0;
+          size_t points_before = final_reconstruction_manager.Get(0).NumPoints3D();
+          
+          if (final_reconstruction_manager.Get(0).Merge(pair.second.Get(0), kMaxReprojError)) {
+            size_t points_after = final_reconstruction_manager.Get(0).NumPoints3D();
+            std::cout << "Successfully merged cluster, points: " << points_before 
+                      << " -> " << points_after << std::endl;
+          } else {
+            std::cout << "Failed to merge cluster with " 
+                      << pair.second.Get(0).NumPoints3D() << " points" << std::endl;
+            std::cout << "saving intermediate state " << std::endl;
+            std::lock_guard<std::mutex> lock(stages_mutex_);
+            
+              // When saving a stage, move it:
+            auto stage_mgr = std::make_unique<ReconstructionManager>();
+            stage_mgr->Add();
+            stage_mgr->Get(0) = final_reconstruction_manager.Get(0);
+            stage_reconstructions_.push_back(std::move(stage_mgr));
+
+            std::string merge_stages_base = options_.cluster_outpath + "/merge_stages";
+            std::string merge_stages_dir = merge_stages_base + "/stage_" + std::to_string(stage_reconstructions_.size());
+
+            // Create parent directory first
+            mkdir(merge_stages_base.c_str(), 0755);
+            // Make sure base and stage dirs exist:
+            mkdir(merge_stages_dir.c_str(), 0755);
+
+            stage_reconstructions_.back()->Get(0).WriteBinary( merge_stages_dir );
+          
+          // Restart with new base
+            final_reconstruction_manager.Clear(); 
+            final_reconstruction_manager.Add();
+            final_reconstruction_manager.Get(0) = pair.second.Get(0);
+            std::cout << "Added as separate reconstruction" << std::endl;            
+            base_manager = &pair.second;
+          }
+        }
+      }
+      
+    }
+    *reconstruction_manager_ = std::move(final_reconstruction_manager);
+    
+  } else {
+    // Use original merging for automatic clustering
+    if (scene_clustering_ptr) {
+      MergeClusters(*scene_clustering_ptr->GetRootCluster(), &reconstruction_managers);
+    }
+    
+    CHECK_EQ(reconstruction_managers.size(), 1);
+    *reconstruction_manager_ = std::move(reconstruction_managers.begin()->second);
+  }
+} else {
+  // Only one cluster, no merging needed
+  if (!reconstruction_managers.empty()) {
+    *reconstruction_manager_ = std::move(reconstruction_managers.begin()->second);
+  }
 }
-
+}
 }  // namespace colmap

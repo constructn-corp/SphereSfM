@@ -49,6 +49,18 @@
 #include "util/misc.h"
 #include "util/opengl_utils.h"
 
+#include <GL/gl.h>
+
+// Define deprecated OpenGL constants for modern OpenGL compatibility
+#ifndef GL_LUMINANCE
+  #define GL_LUMINANCE 0x1909
+#endif
+
+#ifndef GL_UNSIGNED_BYTE
+  #define GL_UNSIGNED_BYTE 0x1401
+#endif
+
+
 namespace colmap {
 namespace {
 

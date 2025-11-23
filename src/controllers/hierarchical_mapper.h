@@ -59,6 +59,15 @@ class HierarchicalMapperController : public Thread {
     // The number of workers used to reconstruct clusters in parallel.
     int num_workers = -1;
 
+    // Path for cluster output files to save
+    std::string cluster_outpath = ".";
+
+    // Path to file containing list of cluster files
+    std::string custom_cluster_list_path = "";
+  
+    // Enable custom clustering mode
+    bool use_custom_clusters = false;
+
     bool Check() const;
   };
 
@@ -67,7 +76,8 @@ class HierarchicalMapperController : public Thread {
       const SceneClustering::Options& clustering_options,
       const IncrementalMapperOptions& mapper_options,
       ReconstructionManager* reconstruction_manager);
-
+      const std::string merge_stages_dir_;
+      std::mutex stages_mutex_;
  private:
   void Run() override;
 
@@ -75,6 +85,7 @@ class HierarchicalMapperController : public Thread {
   const SceneClustering::Options clustering_options_;
   const IncrementalMapperOptions mapper_options_;
   ReconstructionManager* reconstruction_manager_;
+  std::vector<std::unique_ptr<ReconstructionManager>> stage_reconstructions_;
 };
 
 }  // namespace colmap
